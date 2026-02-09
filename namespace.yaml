@@ -1,0 +1,9 @@
+# Namespace for ESO demo - acts as the "secret vault"
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eso-demo
+  labels:
+    app.kubernetes.io/part-of: eso-demo
+    demo: external-secrets
+

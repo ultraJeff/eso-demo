@@ -1,0 +1,99 @@
+# Sample app that uses the synced secrets
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+  namespace: eso-demo
+  labels:
+    app: sample-app
+    app.kubernetes.io/part-of: eso-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      containers:
+      - name: app
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "=== External Secrets Demo ==="
+          echo ""
+          echo "Database Configuration (from synced secret):"
+          echo "  Host: $DB_HOST"
+          echo "  Port: $DB_PORT"
+          echo "  Username: $DB_USERNAME"
+          echo "  Password: [HIDDEN - ${#DB_PASSWORD} chars]"
+          echo ""
+          echo "API Keys (from synced secret):"
+          echo "  Stripe: ${STRIPE_API_KEY:0:10}..."
+          echo "  SendGrid: ${SENDGRID_API_KEY:0:5}..."
+          echo "  OpenAI: ${OPENAI_API_KEY:0:8}..."
+          echo ""
+          echo "TLS Certificate mounted at /tls:"
+          ls -la /tls/
+          echo ""
+          echo "Secrets successfully synced by External Secrets Operator!"
+          echo "Sleeping to keep pod running for inspection..."
+          sleep infinity
+        env:
+        # Database credentials from synced secret
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: DB_PORT
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: database-credentials
+              key: DB_PASSWORD
+        # API keys from synced secret
+        - name: STRIPE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: stripe-api-key
+        - name: SENDGRID_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: sendgrid-api-key
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: openai-api-key
+        volumeMounts:
+        - name: tls-certs
+          mountPath: /tls
+          readOnly: true
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+      volumes:
+      - name: tls-certs
+        secret:
+          secretName: app-tls
+
