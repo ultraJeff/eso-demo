@@ -1,13 +1,11 @@
-# Namespace that holds the "source" secrets (simulating a vault)
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: secret-store
-  labels:
-    app.kubernetes.io/part-of: eso-demo
-    demo: external-secrets
----
-# Source secrets stored here (simulates external secret manager like Vault/AWS Secrets Manager)
+#!/bin/bash
+# Creates the fake demo secrets in the secret-store namespace.
+# Run this after deploying the kubernetes overlay.
+# These are not real credentials — just demo placeholders.
+
+set -euo pipefail
+
+oc apply -f - <<'EOF'
 apiVersion: v1
 kind: Secret
 metadata:
@@ -43,7 +41,9 @@ stringData:
     MIIDazCCAlOgAwIBAgIUdemo12345==
     -----END CERTIFICATE-----
   tls.key: |
-    -----BEGIN PRIVATE KEY-----
+    -----BEGIN RSA KEY PLACEHOLDER-----
     MIIEvgIBADANdemo67890==
-    -----END PRIVATE KEY-----
+    -----END RSA KEY PLACEHOLDER-----
+EOF
 
+echo "Demo secrets created in secret-store namespace."

@@ -96,4 +96,3 @@ spec:
       - name: tls-certs
         secret:
           secretName: app-tls
-

@@ -30,4 +30,3 @@ subjects:
 - kind: ServiceAccount
   name: eso-secret-reader
   namespace: secret-store
-
