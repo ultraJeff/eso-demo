@@ -1,122 +1,97 @@
 # External Secrets Operator Demo
 
-This demo showcases the External Secrets Operator (ESO) for Red Hat OpenShift, which synchronizes secrets from external secret management systems into Kubernetes Secrets.
+Demonstrates the External Secrets Operator (ESO) for Red Hat OpenShift, syncing secrets from external providers into Kubernetes Secrets.
 
-## Overview
-
-The demo uses the **Kubernetes provider** which uses a Kubernetes namespace as the "source of truth" (simulating an external vault like HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault).
+## Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     secret-store namespace                       │
-│  (Simulates external secret manager like Vault/AWS)             │
-│                                                                  │
-│  ┌──────────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ database-        │  │ api-keys     │  │ tls-certificates │  │
-│  │ credentials      │  │              │  │                  │  │
-│  └────────┬─────────┘  └──────┬───────┘  └────────┬─────────┘  │
-└───────────┼────────────────────┼──────────────────┼─────────────┘
-            │                    │                  │
-            │    ClusterSecretStore (ESO)          │
-            │    ────────────────────────          │
-            ▼                    ▼                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        eso-demo namespace                        │
-│                                                                  │
-│  ┌──────────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │ database-        │  │ api-keys     │  │ app-tls          │  │
-│  │ credentials      │  │              │  │                  │  │
-│  │ (synced)         │  │ (synced)     │  │ (synced)         │  │
-│  └────────┬─────────┘  └──────┬───────┘  └────────┬─────────┘  │
-│           │                   │                   │             │
-│           └───────────────────┼───────────────────┘             │
-│                               ▼                                  │
-│                     ┌─────────────────┐                         │
-│                     │   sample-app    │                         │
-│                     │   (uses secrets)│                         │
-│                     └─────────────────┘                         │
-└─────────────────────────────────────────────────────────────────┘
+eso-demo/
+├── base/                        # Shared: ESO config, namespace, sample app
+├── overlays/
+│   ├── kubernetes/              # Kubernetes provider (simulated vault)
+│   └── vault/                   # HashiCorp Vault provider (Wing)
 ```
 
-## Components
+### Overlays
 
-| Resource | Description |
-|----------|-------------|
-| `secret-store` namespace | Holds the "source" secrets (simulates Vault) |
-| `ClusterSecretStore` | Configures ESO to read from the secret-store namespace |
-| `ExternalSecret` | Defines what secrets to sync and how |
-| `sample-app` | Demo app that consumes the synced secrets |
+**`overlays/kubernetes/`** — Uses a Kubernetes namespace as a simulated secret store. Good for demos on a fresh cluster with no external dependencies. Run `setup-demo-secrets.sh` after deploying to create the fake source secrets.
 
-## Secrets Demonstrated
-
-1. **Database Credentials** - Username, password, host, port
-2. **API Keys** - Multiple third-party API keys (Stripe, SendGrid, OpenAI)
-3. **TLS Certificates** - Certificate and private key
+**`overlays/vault/`** — Connects to a real HashiCorp Vault instance. Configured for Wing (`192.168.8.100:8200`) using token auth via a `vault-token` K8s secret.
 
 ## Prerequisites
 
-The External Secrets Operator for Red Hat OpenShift must be installed. This demo includes the `ExternalSecretsConfig` resource that deploys the ESO controller pods.
+- External Secrets Operator for Red Hat OpenShift installed
+- For the Vault overlay:
+  - Vault running and unsealed
+  - Secrets stored in Vault under `secret/eso-demo/`
+  - A `vault-token` secret in the `eso-demo` namespace with a read-only Vault token
+  - Network policy allowing ESO egress to Vault (ESO operator denies all egress by default)
 
-## Installation
+## Deploying
+
+### Vault overlay (production-like)
 
 ```bash
-# Deploy the demo (includes ExternalSecretsConfig, source secrets, and sample app)
-oc apply -k .
+# 1. Create the vault-token secret (not in git)
+oc create secret generic vault-token \
+  --from-literal=token=<your-vault-token> \
+  -n eso-demo
 
-# Wait for secrets to sync
-sleep 10
+# 2. Annotate so ArgoCD doesn't prune it
+oc annotate secret vault-token -n eso-demo \
+  argocd.argoproj.io/compare-options=IgnoreExtraneous
 
-# Check ExternalSecret status
-oc get externalsecrets -n eso-demo
+# 3. Add network policy for ESO -> Vault egress
+cat <<EOF | oc apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eso-allow-vault-egress
+  namespace: external-secrets
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.8.100/32
+      ports:
+        - protocol: TCP
+          port: 8200
+EOF
 
-# Check the synced secrets
-oc get secrets -n eso-demo
+# 4. Deploy via ArgoCD or directly
+oc apply -k overlays/vault/
+```
 
-# View the sample app logs
-oc logs -n eso-demo deploy/sample-app
+### Kubernetes overlay (standalone demo)
+
+```bash
+oc apply -k overlays/kubernetes/
+# Then create the simulated source secrets:
+./overlays/kubernetes/setup-demo-secrets.sh
 ```
 
 ## Verification
 
 ```bash
 # Check ClusterSecretStore is valid
-oc get clustersecretstores kubernetes-secret-store
+oc get clustersecretstore
 
 # Check ExternalSecrets are synced
-oc get externalsecrets -n eso-demo -o wide
+oc get externalsecrets -n eso-demo
 
-# Compare source and synced secrets
-echo "=== Source Secret ==="
-oc get secret database-credentials -n secret-store -o jsonpath='{.data.username}' | base64 -d
-echo ""
-echo "=== Synced Secret ==="
-oc get secret database-credentials -n eso-demo -o jsonpath='{.data.DB_USERNAME}' | base64 -d
+# View sample app consuming the secrets
+oc logs -n eso-demo deploy/sample-app
 ```
 
-## Key Features Demonstrated
+## Secrets Demonstrated
 
-1. **Secret Transformation** - Source keys are renamed (e.g., `username` → `DB_USERNAME`)
-2. **Multiple Sync Strategies** - Individual keys vs. `dataFrom` (sync all keys)
-3. **Different Secret Types** - Opaque secrets and TLS secrets
-4. **Refresh Interval** - Automatic secret rotation (1h, 30m, 24h)
-5. **Templating** - Custom labels and metadata on synced secrets
-
-## Real-World Use Cases
-
-In production, you would replace the Kubernetes provider with:
-
-| Provider | Use Case |
-|----------|----------|
-| **HashiCorp Vault** | Enterprise secret management |
-| **AWS Secrets Manager** | AWS-native applications |
-| **Azure Key Vault** | Azure-native applications |
-| **GCP Secret Manager** | GCP-native applications |
-| **CyberArk** | Enterprise PAM integration |
-| **1Password** | Team secret sharing |
-
-## Cleanup
-
-```bash
-oc delete -k .
-```
-
+| Secret | Type | Refresh |
+|--------|------|---------|
+| Database credentials | Opaque (key-mapped) | 1h |
+| API keys | Opaque (extracted) | 30m |
+| TLS certificates | kubernetes.io/tls | 24h |
